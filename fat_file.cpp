@@ -1,6 +1,16 @@
 #include "fat.h"
 #include "fat_file.h"
 
+#include <cstring>
+#include <cassert>
+#include <cstdarg>
+#include <stdio.h>
+#include <string.h>
+#include <cstdio>
+
+
+
+
 // Little helper to show debug messages. Set 1 to 0 to silence.
 #define DEBUG 1
 inline void debug(const char * fmt, ...) {
@@ -124,16 +134,34 @@ FAT_OPEN_FILE * mini_file_open(FAT_FILESYSTEM *fs, const char *filename, const b
 	FAT_FILE * fd = mini_file_find(fs, filename);
 	if (!fd) {
 		// TODO: check if it's write mode, and if so create it. Otherwise return NULL.
-		return NULL;
+		if(!is_write) {
+			return NULL;
+		}
+
+		fd = mini_file_create_file(fs,filename);
+
+		if (fd == NULL) {
+			return NULL;
+		}
 	}
 
 	if (is_write) {
 		// TODO: check if other write handles are open.
-		return NULL;
+		
+		for(auto & handles: fd->open_handles){	
+			if(handles->is_write){
+				return NULL;
+			}	
+		}
+
 	}
 
 	FAT_OPEN_FILE * open_file = new FAT_OPEN_FILE;
 	// TODO: assign open_file fields.
+
+	open_file->is_write = is_write;
+	open_file->file = fd;
+	open_file->position = 0;
 
 	// Add to list of open handles for fd:
 	fd->open_handles.push_back(open_file);
@@ -166,6 +194,32 @@ int mini_file_write(FAT_FILESYSTEM *fs, FAT_OPEN_FILE * open_file, const int siz
 
 	// TODO: write to file.
 
+	FILE *newfile = fopen(open_file->file->name, "ab");
+
+	for(int i = 0; i < size; i++) {
+		if(position_to_byte_index(fs, open_file->position) == 0) {
+			if(mini_fat_allocate_new_block(fs, FILE_DATA_BLOCK) == -1) {
+				break;
+			}
+		}
+
+		written_bytes++;
+		open_file->position += 1;
+
+	}
+
+	fwrite(buffer,1,written_bytes,newfile);
+
+	FAT_FILE * newfatfile = mini_file_find(fs, open_file->file->name);
+
+	int prev_size = newfatfile->size;
+	newfatfile->size = prev_size + written_bytes;
+	char aa[4096] = "";
+
+	fread(aa, written_bytes, 1, newfile);
+
+	printf("%s\n",aa);
+
 	return written_bytes;
 }
 
@@ -178,6 +232,26 @@ int mini_file_read(FAT_FILESYSTEM *fs, FAT_OPEN_FILE * open_file, const int size
 	int read_bytes = 0;
 
 	// TODO: read file.
+
+	FILE *newfile = fopen(open_file->file->name, "rb");
+
+	FAT_FILE * newfatfile = mini_file_find(fs, open_file->file->name);
+
+	int file_size = newfatfile->size;
+
+	if(!size == 0) {
+		for(int i = 0; i < size; i++) {
+			if(open_file->position >= file_size) {
+				break;
+			}
+			open_file->position += 1;
+			read_bytes++;
+		}
+
+		fread(buffer, read_bytes, 1, newfile);
+
+		printf("%s\n",buffer);
+	}
 
 	return read_bytes;
 }
@@ -193,6 +267,22 @@ bool mini_file_seek(FAT_FILESYSTEM *fs, FAT_OPEN_FILE * open_file, const int off
 {
 	// TODO: seek and return true.
 
+	int pos;// currrent position
+
+	if(from_start) {
+		pos = 0;
+	} else {
+		pos = open_file->position;
+	} 
+
+	pos += offset;
+
+	if(pos < 0 || pos > open_file->file->size) {
+		return false;
+	}
+
+	open_file->position = pos;
+
 	return false;
 }
 
@@ -206,5 +296,23 @@ bool mini_file_delete(FAT_FILESYSTEM *fs, const char *filename)
 {
 	// TODO: delete file after checks.
 
+	FAT_FILE * newfatfile = mini_file_find(fs, filename);
+
+	if (newfatfile == NULL || !newfatfile->open_handles.empty()){
+		return false;
+	}
+
+	int metadata_block_id = newfatfile->metadata_block_id;
+	std::vector<int> blocks = newfatfile->block_ids;
+
+
+	fs->block_map[metadata_block_id] = EMPTY_BLOCK;	
+
+	for(auto & id: blocks){
+		fs->block_map[id] = EMPTY_BLOCK;
+	}
+
 	return false;
 }
+
+

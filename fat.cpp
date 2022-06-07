@@ -7,6 +7,10 @@
 #include "fat.h"
 #include "fat_file.h"
 
+#include <cstdlib>
+#include <cstring>
+#include <cassert>
+
 
 /**
  * Write inside one block in the filesystem.
@@ -57,6 +61,13 @@ int mini_fat_read_in_block(FAT_FILESYSTEM *fs, const int block_id, const int blo
  */
 int mini_fat_find_empty_block(const FAT_FILESYSTEM *fat) {
 	// TODO: find an empty block in fat and return its index.
+	int i = 0;
+	for(auto & element: fat->block_map){
+		if(element == EMPTY_BLOCK) {
+			return i;
+		}
+		i += 1;
+	}
 
 	return -1;
 }
@@ -113,6 +124,20 @@ FAT_FILESYSTEM * mini_fat_create(const char * filename, const int block_size, co
 	FAT_FILESYSTEM * fat = mini_fat_create_internal(filename, block_size, block_count);
 
 	// TODO: create the corresponding virtual disk file with appropriate size.
+
+	FILE *newfile = fopen(filename, "wb");
+
+	if(newfile == NULL) {
+		printf("Error!");   
+		exit(1);   
+	}
+	int disk_space = block_count*block_size;
+	
+	fseek(newfile, disk_space, SEEK_SET);
+	fputc('\0',newfile);
+	fseek(newfile, 0, SEEK_SET);
+	fclose(newfile);
+
 	return fat;
 }
 
